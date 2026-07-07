@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>第18期 現金出納帳（領収書スキャン）</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif; background: #f2f4f7; color: #1a2433; padding-bottom: 40px; }
+  header { background: #1e4d8c; color: #fff; padding: 14px 16px; position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 17px; font-weight: 600; }
+  header p { font-size: 12px; opacity: .85; margin-top: 2px; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 12px; }
+  .banner { display: none; background: #fff3cd; border: 1px solid #ffe08a; color: #7a5b00; border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 10px; line-height: 1.5; }
+  .card { background: #fff; border-radius: 14px; box-shadow: 0 1px 4px rgba(20,40,80,.08); padding: 14px; margin-bottom: 12px; }
+  .btn { display: block; width: 100%; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .btn-camera { background: #1e4d8c; color: #fff; }
+  .btn-manual { background: #eef3fa; color: #1e4d8c; margin-top: 8px; }
+  .btn-save { background: #1d8a4e; color: #fff; margin-top: 12px; }
+  .btn-cancel { background: #f0f1f4; color: #555; margin-top: 8px; }
+  .btn-csv { background: #fff; color: #1e4d8c; border: 2px solid #1e4d8c; margin-top: 8px; }
+  .btn:active { opacity: .8; }
+  #photoInput { display: none; }
+  #progress { display: none; text-align: center; padding: 14px 6px 4px; font-size: 14px; color: #1e4d8c; }
+  .bar { height: 8px; background: #e3e9f2; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .bar > div { height: 100%; width: 0%; background: #1e4d8c; transition: width .3s; }
+  #preview { display: none; width: 100%; border-radius: 10px; margin-top: 10px; max-height: 220px; object-fit: contain; background: #000; }
+  #entryForm { display: none; }
+  label { display: block; font-size: 12px; font-weight: 600; color: #556; margin: 10px 0 4px; }
+  input, select, textarea { width: 100%; padding: 11px 10px; font-size: 16px; border: 1px solid #ccd3de; border-radius: 9px; background: #fafbfd; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #1e4d8c; background: #fff; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 > div { flex: 1; }
+  .hint { font-size: 11px; color: #889; margin-top: 3px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .toolbar select { flex: 1; }
+  .summary { display: flex; gap: 6px; margin-bottom: 10px; }
+  .sumbox { flex: 1; background: #fff; border-radius: 10px; padding: 9px 6px; text-align: center; box-shadow: 0 1px 3px rgba(20,40,80,.07); }
+  .sumbox .t { font-size: 10px; color: #778; }
+  .sumbox .v { font-size: 14px; font-weight: 700; margin-top: 2px; }
+  .in-c { color: #1d8a4e; } .out-c { color: #c0392b; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { background: #f0f4f9; color: #445; padding: 7px 4px; text-align: left; font-size: 11px; white-space: nowrap; }
+  td { padding: 8px 4px; border-top: 1px solid #eef0f4; vertical-align: top; }
+  td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .del { color: #c0392b; background: none; border: none; font-size: 15px; padding: 2px 6px; cursor: pointer; }
+  .empty { text-align: center; color: #99a; padding: 24px 10px; font-size: 13px; }
+  .memo { color: #667; font-size: 11px; }
+  .kamoku { font-weight: 600; }
+  .carry { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .carry input { flex: 1; }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1a2433; color: #fff; padding: 10px 18px; border-radius: 22px; font-size: 14px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 50; }
+  .toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+<header>
+  <h1>第18期 現金出納帳</h1>
+  <p>領収書を撮影すると日付・金額・店名を自動で読み取ります</p>
+</header>
+
+<div class="wrap">
+  <div class="banner" id="ocrBanner">
+    ⚠️ この環境ではOCR（自動読み取り）が使えません。「手動で入力する」をご利用ください。<br>
+    SafariやChromeで直接このファイルを開くとOCRが使えます。
+  </div>
+  <div class="banner" id="storageBanner" style="background:#fde8e8;border-color:#f5b5b5;color:#8a1f1f;">
+    ⚠️ この環境ではデータの保存ができません。入力後は必ず「CSVを書き出す」でデータを保存してください。
+  </div>
+
+  <div class="card">
+    <button class="btn btn-camera" id="btnCamera">📷 領収書を撮影して読み取り</button>
+    <input type="file" id="photoInput" accept="image/*" capture="environment">
+    <button class="btn btn-manual" id="btnManual">✏️ 手動で入力する</button>
+    <div id="progress">
+      <span id="progText">読み取り中...</span>
+      <div class="bar"><div id="progBar"></div></div>
+    </div>
+    <img id="preview" alt="領収書プレビュー">
+  </div>
+
+  <div class="card" id="entryForm">
+    <div class="row2">
+      <div>
+        <label>日付</label>
+        <input type="date" id="fDate">
+      </div>
+      <div>
+        <label>区分</label>
+        <select id="fType">
+          <option value="out">出金（支払い）</option>
+          <option value="in">入金</option>
+        </select>
+      </div>
+    </div>
+    <label>金額（円）</label>
+    <input type="number" id="fAmount" inputmode="numeric" placeholder="例: 1980">
+    <label>相手科目</label>
+    <select id="fKamoku">
+      <option>消耗品費</option><option>旅費交通費</option><option>接待交際費</option>
+      <option>会議費</option><option>通信費</option><option>車両費</option>
+      <option>燃料費</option><option>修繕費</option><option>事務用品費</option>
+      <option>福利厚生費</option><option>租税公課</option><option>支払手数料</option>
+      <option>雑費</option><option>売上高</option><option>普通預金</option><option>その他</option>
+    </select>
+    <label>補助科目（任意）</label>
+    <input type="text" id="fHojo" placeholder="例: ガソリン、事務所">
+    <label>摘要（店名・内容）</label>
+    <input type="text" id="fTekiyo" placeholder="例: セブンイレブン 文房具">
+    <div class="hint" id="ocrHint"></div>
+    <button class="btn btn-save" id="btnSave">出納帳に追加する</button>
+    <button class="btn btn-cancel" id="btnCancel">キャンセル</button>
+  </div>
+
+  <div class="card">
+    <div class="carry">
+      <span>繰越残高</span>
+      <input type="number" id="carryOver" inputmode="numeric" placeholder="期首の現金残高">
+      <button class="btn" style="width:auto;padding:10px 14px;font-size:13px;background:#eef3fa;color:#1e4d8c;" id="btnCarry">設定</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <select id="monthFilter"><option value="all">すべての月</option></select>
+  </div>
+
+  <div class="summary">
+    <div class="sumbox"><div class="t">入金合計</div><div class="v in-c" id="sumIn">¥0</div></div>
+    <div class="sumbox"><div class="t">出金合計</div><div class="v out-c" id="sumOut">¥0</div></div>
+    <div class="sumbox"><div class="t">現在残高</div><div class="v" id="sumBal">¥0</div></div>
+  </div>
+
+  <div class="card" style="padding:6px 8px;">
+    <table>
+      <thead><tr><th>日付</th><th>摘要／科目</th><th style="text-align:right">入金</th><th style="text-align:right">出金</th><th style="text-align:right">残高</th><th></th></tr></thead>
+      <tbody id="ledgerBody"></tbody>
+    </table>
+    <div class="empty" id="emptyMsg">まだ記帳がありません。<br>領収書を撮影するか、手動で入力してください。</div>
+  </div>
+
+  <button class="btn btn-csv" id="btnCsv">📄 CSVを書き出す（Excel取り込み用）</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  'use strict';
+  var STORAGE_KEY = 'suito18_entries';
+  var CARRY_KEY = 'suito18_carry';
+  var entries = [];
+  var carryOver = 0;
+  var storageOK = true;
+  var ocrOK = true;
+  var worker = null;
+
+  // ---- ストレージ確認 ----
+  try {
+    localStorage.setItem('_t', '1'); localStorage.removeItem('_t');
+    entries = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    carryOver = Number(localStorage.getItem(CARRY_KEY) || 0);
+  } catch(e) {
+    storageOK = false;
+    document.getElementById('storageBanner').style.display = 'block';
+  }
+
+  // ---- OCR環境確認 ----
+  if (typeof Worker === 'undefined' || typeof Tesseract === 'undefined') {
+    ocrOK = false;
+    document.getElementById('ocrBanner').style.display = 'block';
+  }
+
+  function save() {
+    if (!storageOK) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+      localStorage.setItem(CARRY_KEY, String(carryOver));
+    } catch(e) {}
+  }
+
+  function yen(n) { return '¥' + Number(n).toLocaleString('ja-JP'); }
+
+  function toast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg; t.classList.add('show');
+    setTimeout(function(){ t.classList.remove('show'); }, 2200);
+  }
+
+  // ---- OCR解析（日付・金額・店名の抽出）----
+  function parseReceipt(text) {
+    var result = { date: '', amount: '', store: '' };
+    var t = text.replace(/[０-９]/g, function(s){ return String.fromCharCode(s.charCodeAt(0)-0xFEE0); });
+
+    // 日付: 2026年7月7日 / 2026/07/07 / 2026-7-7 / 令和8年7月7日 / R8.7.7
+    var m = t.match(/(20\d{2})[年\/\-\.](\d{1,2})[月\/\-\.](\d{1,2})/);
+    if (!m) {
+      var w = t.match(/(?:令和|R)\s*(\d{1,2})[年\.](\d{1,2})[月\.](\d{1,2})/);
+      if (w) m = [null, String(2018 + Number(w[1])), w[2], w[3]];
+    }
+    if (m) {
+      result.date = m[1] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[3]).slice(-2);
+    }
+
+    // 金額: 「合計」「税込」「お買上」付近の数字を最優先、なければ¥付き最大値
+    var lines = t.split(/\n/);
+    var best = 0, keyBest = 0;
+    lines.forEach(function(line){
+      var nums = line.replace(/[,，]/g,'').match(/\d{2,7}/g) || [];
+      var isKey = /合\s*計|税込|お買上|総額|領収金額|ご請求/.test(line);
+      nums.forEach(function(n){
+        n = Number(n);
+        if (n < 10 || n > 5000000) return;
+        if (isKey && n > keyBest) keyBest = n;
+        if (n > best) best = n;
+      });
+    });
+    result.amount = keyBest || best || '';
+
+    // 店名: 最初の意味のある行（数字や記号だけの行は除く）
+    for (var i = 0; i < Math.min(lines.length, 6); i++) {
+      var s = lines[i].replace(/\s+/g,' ').trim();
+      if (s.length >= 2 && !/^[\d\s\-\/:¥,\.]+$/.test(s) && !/領収|レシート|receipt/i.test(s)) {
+        result.store = s.slice(0, 30); break;
+      }
+    }
+    return result;
+  }
+
+  function withTimeout(promise, ms) {
+    return Promise.race([promise, new Promise(function(_, rej){
+      setTimeout(function(){ rej(new Error('timeout')); }, ms);
+    })]);
+  }
+
+  async function runOCR(file) {
+    var prog = document.getElementById('progress');
+    var bar = document.getElementById('progBar');
+    var txt = document.getElementById('progText');
+    var hint = document.getElementById('ocrHint');
+    prog.style.display = 'block'; bar.style.width = '5%';
+    txt.textContent = '読み取り準備中...（初回は辞書のダウンロードで1〜2分かかります）';
+    hint.textContent = '自動読み取り中です。待たずにそのまま手動で入力しても大丈夫です。';
+    try {
+      if (!worker) {
+        worker = await withTimeout(Tesseract.createWorker('jpn', 1, {
+          logger: function(m){
+            if (m.status === 'recognizing text') {
+              bar.style.width = (20 + m.progress * 80) + '%';
+              txt.textContent = '読み取り中... ' + Math.round(m.progress * 100) + '%';
+            } else if (m.status && m.progress != null) {
+              bar.style.width = (5 + m.progress * 15) + '%';
+            }
+          }
+        }), 150000);
+      }
+      bar.style.width = '20%';
+      txt.textContent = '読み取り中...';
+      var res = await withTimeout(worker.recognize(file), 90000);
+      prog.style.display = 'none';
+      var parsed = parseReceipt((res && res.data && res.data.text) || '');
+      var found = [];
+      if (parsed.date) { document.getElementById('fDate').value = parsed.date; found.push('日付'); }
+      if (parsed.amount) { document.getElementById('fAmount').value = parsed.amount; found.push('金額'); }
+      if (parsed.store && !document.getElementById('fTekiyo').value) { document.getElementById('fTekiyo').value = parsed.store; found.push('店名'); }
+      if (found.length) {
+        hint.textContent = '自動で読み取りました（' + found.join('・') + '）。間違いがあれば修正してください。';
+        toast('読み取り完了：' + found.join('・'));
+      } else {
+        hint.textContent = '文字をうまく読み取れませんでした。手動で入力してください。';
+        toast('読み取れませんでした。手動で入力してください');
+      }
+    } catch(e) {
+      prog.style.display = 'none';
+      document.getElementById('ocrBanner').style.display = 'block';
+      hint.textContent = '自動読み取りができませんでした（通信環境の問題の可能性）。手動で入力してください。';
+      toast('自動読み取りに失敗しました');
+      worker = null;
+    }
+  }
+
+  // ---- フォーム ----
+  function openForm(pre, fromOCR) {
+    pre = pre || {};
+    document.getElementById('entryForm').style.display = 'block';
+    document.getElementById('fDate').value = pre.date || new Date().toISOString().slice(0,10);
+    document.getElementById('fAmount').value = pre.amount || '';
+    document.getElementById('fTekiyo').value = pre.store || '';
+    document.getElementById('fHojo').value = '';
+    document.getElementById('fType').value = 'out';
+    document.getElementById('ocrHint').textContent = fromOCR
+      ? '自動読み取りの結果です。間違いがあれば修正してください。'
+      : '';
+    document.getElementById('entryForm').scrollIntoView({behavior:'smooth'});
+  }
+
+  function closeForm() {
+    document.getElementById('entryForm').style.display = 'none';
+    document.getElementById('preview').style.display = 'none';
+  }
+
+  document.getElementById('btnCamera').addEventListener('click', function(){
+    document.getElementById('photoInput').click();
+  });
+
+  document.getElementById('photoInput').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    if (!file) return;
+    var img = document.getElementById('preview');
+    img.src = URL.createObjectURL(file);
+    img.style.display = 'block';
+    openForm({}, false);
+    if (ocrOK) { runOCR(file); }
+    e.target.value = '';
+  });
+
+  document.getElementById('btnManual').addEventListener('click', function(){ openForm({}, false); });
+  document.getElementById('btnCancel').addEventListener('click', closeForm);
+
+  document.getElementById('btnSave').addEventListener('click', function(){
+    var date = document.getElementById('fDate').value;
+    var amount = Number(document.getElementById('fAmount').value);
+    if (!date) { toast('日付を入力してください'); return; }
+    if (!amount || amount <= 0) { toast('金額を入力してください'); return; }
+    entries.push({
+      id: Date.now(),
+      date: date,
+      type: document.getElementById('fType').value,
+      amount: amount,
+      kamoku: document.getElementById('fKamoku').value,
+      hojo: document.getElementById('fHojo').value.trim(),
+      tekiyo: document.getElementById('fTekiyo').value.trim()
+    });
+    entries.sort(function(a,b){ return a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id; });
+    save(); render(); closeForm();
+    toast('出納帳に追加しました');
+  });
+
+  document.getElementById('btnCarry').addEventListener('click', function(){
+    carryOver = Number(document.getElementById('carryOver').value) || 0;
+    save(); render();
+    toast('繰越残高を設定しました');
+  });
+
+  // ---- 表示 ----
+  function render() {
+    document.getElementById('carryOver').value = carryOver || '';
+    var filter = document.getElementById('monthFilter').value;
+
+    // 月フィルターの選択肢を更新
+    var months = {};
+    entries.forEach(function(e){ months[e.date.slice(0,7)] = true; });
+    var mf = document.getElementById('monthFilter');
+    var cur = mf.value;
+    mf.innerHTML = '<option value="all">すべての月</option>';
+    Object.keys(months).sort().forEach(function(m){
+      var o = document.createElement('option');
+      o.value = m; o.textContent = m.replace('-', '年') + '月';
+      mf.appendChild(o);
+    });
+    mf.value = Array.prototype.some.call(mf.options, function(o){ return o.value === cur; }) ? cur : 'all';
+    filter = mf.value;
+
+    // 残高は全件通しで計算
+    var bal = carryOver, sumIn = 0, sumOut = 0;
+    var rows = [];
+    entries.forEach(function(e){
+      bal += (e.type === 'in' ? e.amount : -e.amount);
+      var show = (filter === 'all' || e.date.slice(0,7) === filter);
+      if (show) {
+        if (e.type === 'in') sumIn += e.amount; else sumOut += e.amount;
+        rows.push({ e: e, bal: bal });
+      }
+    });
+
+    document.getElementById('sumIn').textContent = yen(sumIn);
+    document.getElementById('sumOut').textContent = yen(sumOut);
+    document.getElementById('sumBal').textContent = yen(bal);
+
+    var tb = document.getElementById('ledgerBody');
+    tb.innerHTML = '';
+    rows.forEach(function(r){
+      var e = r.e;
+      var tr = document.createElement('tr');
+      var d = e.date.slice(5).replace('-', '/');
+      tr.innerHTML =
+        '<td>' + d + '</td>' +
+        '<td><span class="memo">' + esc(e.tekiyo || '') + '</span><br><span class="kamoku">' + esc(e.kamoku) + (e.hojo ? '／' + esc(e.hojo) : '') + '</span></td>' +
+        '<td class="num in-c">' + (e.type==='in' ? yen(e.amount) : '') + '</td>' +
+        '<td class="num out-c">' + (e.type==='out' ? yen(e.amount) : '') + '</td>' +
+        '<td class="num">' + yen(r.bal) + '</td>' +
+        '<td><button class="del" data-id="' + e.id + '">✕</button></td>';
+      tb.appendChild(tr);
+    });
+    document.getElementById('emptyMsg').style.display = rows.length ? 'none' : 'block';
+  }
+
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+  document.getElementById('ledgerBody').addEventListener('click', function(ev){
+    var btn = ev.target.closest('.del');
+    if (!btn) return;
+    if (!confirm('この記帳を削除しますか？')) return;
+    var id = Number(btn.getAttribute('data-id'));
+    entries = entries.filter(function(e){ return e.id !== id; });
+    save(); render();
+  });
+
+  document.getElementById('monthFilter').addEventListener('change', render);
+
+  // ---- CSV出力 ----
+  document.getElementById('btnCsv').addEventListener('click', function(){
+    var lines = ['日付,相手科目,補助科目,摘要,入金,出金,残高'];
+    var bal = carryOver;
+    lines.push(',,,繰越残高,,,' + carryOver);
+    entries.forEach(function(e){
+      bal += (e.type === 'in' ? e.amount : -e.amount);
+      lines.push([
+        e.date.replace(/-/g,'/'),
+        csvEsc(e.kamoku), csvEsc(e.hojo), csvEsc(e.tekiyo),
+        e.type==='in' ? e.amount : '',
+        e.type==='out' ? e.amount : '',
+        bal
+      ].join(','));
+    });
+    var blob = new Blob(['\uFEFF' + lines.join('\r\n')], {type: 'text/csv'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '第18期現金出納帳.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('CSVを書き出しました');
+  });
+
+  function csvEsc(s){ s = String(s||''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; }
+
+  render();
+})();
+</script>
+</body>
+</html>
